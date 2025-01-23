@@ -1,0 +1,80 @@
+
+- 일반적인 웹 시스템 구성
+    - 정적 리소스(HTML, CSS , JS, image)는 웹 서버가 처리
+    - 웹 서버가 애플리케이션 로직 같은 동적 처리가 필요하면  WAS에 요청
+    - WAS는 비용이 크기에 중요한 애플리케이션 로직 처리만 전담함
+    - WAS가 DB에 접근함
+- API로 데이터만 제공받으려면 굳이 web server 필요없다는 듯
+- 쓰레드 풀 안에 쓰레드를 놀게 만들다가 고객 요청이 오면 놀고 있는 스레드를 배치시켜준다. 사용 끝나면 반납을 한다. 즉 미리 풀 안에 만들어놓고 쓰고 반납하는 방식 (종료 x, 반납 ㅇ). 만약 풀 안의 모든 쓰레드가 실행 중인데 새로운 요청이 들어오면 쓰레드 대기/거절 시켜서 과부하를 막는다. 미리 생성된 쓰레드를 사용하므로 종료 비용(CPU)이 절약되고 응답시간 빠름
+    - 톰캣은 최대 200개의 쓰레드를 풀로 설정한다 (변경 가능)
+- WAS의 주요 튜닝 포인트는 최대 쓰레드 수이다.
+- 성능 테스트 툴 : 아파치 ab, 제이미터, nGrinder
+- 멀티쓰레드 환경이므로 싱글톤 객체(서블릿, 스프링 빈)은 주의해서 사용한다.
+    - 공유 변수를 만들땐 주의해야함
+- 스프링부트는 웹 애플리케이션 서버(WAS)인 톰캣을 내장하고 있어서 편리함
+
+- 스프링 부트는 서블릿을 직접 등록해서 사용할 수 있도록 @ServletComponentScan 지원한다.
+- @WebServlet(name = "helloservlet", urlPatterns = "/hello")
+    - /hello로 들어오면 아래 클래스가 실행되는거임
+    - 서블릿이 호출되면 'service'라는 메서드가 호출됨
+    - 즉 WAS가 request, response 객체를 만들어서 서블릿에 던져줌
+- 서블릿은 html 스펙의 메세지를 편리하게 읽도록 해줌. 디테일한 파싱 자체가 필요 없음
+- extends HttpServlet으로 상속 받고 protected void service에서 구현한다
+- *오류의 로그레벨이 DEBUG*인거면 무시하도록 application.properties에
+    - logging.level.org.apache.coyote.http11.Http11Processor=INFO
+    - 추가했음 -> 로그 오류 해결함
+    - [java.io.EOFException: null - Stack Overflow](https://stackoverflow.com/questions/77727371/java-io-eofexception-null) 참고
+    - [spring - SpringBoot - Error parsing HTTP request header (Oauth2 https endpoints) - Stack Overflow](https://stackoverflow.com/questions/51501360/springboot-error-parsing-http-request-header-oauth2-https-endpoints) 참고
+    - ??? : If the log level were not DEBUG, the EOF would have been silently swallowed. It's unfortunate that the message says "Unexpected EOF" since in this case it's normal.
+- build.gradle에
+    - implementation 'org.apache.tomcat.embed:tomcat-embed-jasper'
+    - implementation 'jakarta.servlet.jsp.jstl:jakarta.servlet.jsp.jstl-api:3.0.0'
+    - 추가함
+- 당연하지만 RequestParamServlet 클래스에서
+    - request.getParameter("username"); 로 받아올 수 있는 이유는 basic.html에
+    - a href="/request-param?username=hello&age=20" 등의 형태로 사전 합의가 되어 있기 떄문이다.
+- 매번 html 파일만들어서 테스트하기 귀찮으니 postman으로 메세지 쏘면 된다 (테스트 용인듯)
+- jackson이 json 라이브러리다
+- 스프링에서 ObjectMapper를 제공해줌. 이걸로 HelloData 형태로 객체로 변환해서 값을 읽어줌
+- 여기까지는 Http 요청(request 패키지)을 처리하는 방식이였고 이제 응답 메세지를 생성(response 패키지)해본다
+- ResponseHtmlServlet : /response-html 원본보기 누르면 html로 출력되는걸 알 수 있다. 단순 문자열 print가 아님.
+- ResponseJsonservlet : 객체 helloData를 objectMapper를 통해 json 형태로 바꿔준다.
+- getter, setter랑 생성자는 별개임 (헷갈리지말 것)
+- hello-form.html은 파일이기에 동적으로 코드를 넣을 수 없으나 MemberSaveServlet에서 제공하는 html 파일은 저것과 동일한 역할을 함과 동시에 동적으로 코드를 넣을 수 있다는 차이가 있음 (서블릿 덕분)
+    - 여전히 자바코드에 html을 작성해야한다는 큰 불편함이 있음 -> 템플릿 엔진(JSP, Thymeleaf)로 해결 가능
+- save.jsp에는 실제로 자바 코드 뭉치를 넣는다
+
+----
+
+- MVC 패턴을 이용해보자
+    - Servlet을 controller로 사용한다
+    - JSP를 view로 사용한다
+    - HttpServletRequest 객체를 Model로 사용한다.
+        - request.setAttribute() / getAttribute()로 데이터를 보관 / 조회 한다.
+- MvcMemberFormServelet (컨트롤러 역할)
+    - request.getRequestDispatcher(뷰 경로) : 컨트롤러 -> 뷰 이동때 사용된다
+    - dispatcher.forward() : 다른 서블릿이나 JSP로 이동할 수 있는 기능이다. 서버 내부에서 다시 호출이 발생한다 (서블릿에서 JSP를 호출할 수 있다.)
+- 'WEB-INF' 하위의 자원들은 외부에서 호출해도 호출되지 않는다 (WAS 룰임)
+    - 즉 localhost:8080/WEB-INF/views/new-form.jsp 해도 에러페이지뜬다.
+    - 항상 컨트롤러(서블릿)를 거쳐서 내부에서 forward 등을 해야 호출됨
+        - "save"라는 상대 경로를 썼는데 현경로에서 /save 추가 해주는 효과를 준다
+- forward vs redirect
+    - foward는 클라가 서버 호출, 서버가 컨트롤러 호출, 컨트롤러가 뷰 호출, 뷰가 http 응답 코드 만들어서 클라에 보냄. 즉 클라는 응답을 한번만 받음
+    - redirect는 실제로 응답을 두 번 받음.
+    - 즉 forward는 경로 변경이 서버 내부에서 일어나는 호출이기에 클라가 인지하지 못한다는 차이가 있음
+- servletmvc 디렉의 MvcMemberListServlet 등의 *servlet*들은 *controller*이고 WEB-INF/views에 있는 member.jsp 같은 *jsp*들이 *view* 이다.
+- **정리**
+    - web/servlet의 MemberListServlet이란 순수 servlet 코드는 내부에 더러운 html 코드들이 있지만 web/servletmvc의 MvcMemberListServlet은 그런게 없이 깔끔한, 컨트롤러로서의 역할만 한다.
+    - 마찬가지로 webapp/jsp의 members.jsp란 순수 jsp 파일에는 더러운 자바 코드들이 있지만 WEB-INF/views의 members.jsp에는 깔끔한 jsp 코드들만 있어서 뷰로서의 역할만 한다.
+    - 즉 main/java/hello/servlet/web/servletmvc의 servlet의 자바파일들이 컨트롤러, main/webapp/WEB-INF/views의 jsp 파일들이 뷰 역할이다
+- **흐름 정리**
+    - index.html에서 회원가입 링크 누르면 /jsp/members/new-form.jsp에 의해  컨트롤러인 MvcMemberFormServlet로 감 (이 컨트롤러는 딱히 별 기능은 없긴하지만 무조건 컨트롤러를 거쳐 뷰로 가는게 기본이라 필요함)
+    - 얘가 /WEB-INF/views/new-form.jsp라는 뷰 경로를 포워딩함
+    - new-form.jsp는 action="save"라는 상대경로를 통해 /servlet-mvc/members/save라는 경로를 만듦 (이 경로는 MvcMemberSaveServlet라는 컨트롤러임)
+    - MvcMemberSaveServlet에서 멤버의 이름과 나이를 setAttribute라는 Model에 저장한 뒤 /WEB-INF/views/save-result.jsp 경로를 포워딩한다
+    - save-result.jsp는 뷰로서 클라가 신상정보를 잘 저장한 모습을 깔끔하게 출력해준다. 이때 앞서 설명했듯 redirect가 아니라 forward이기에 경로는 여전히 localhost:8080/servlet-mvc/members/save 인걸 확인할 수 있다.
+    - 이제 회원목록을 클릭하면 index.html에서는 "/servlet-mvc/members"이쪽 링크를 연결해준다.
+    - 거기는 MvcMemberListServlet라는 컨트롤러이고. 여기서 유저 리스트를 내부적으로 List에 담아서 setAttribute에 담고 /WEB-INF/views/members.jsp라는 뷰경로에 포워딩한다.
+    - 포워딩된 members.jsp는 깔끔한 jsp 코드로 저장된 회원 목록을 출력한다. 앞서 설명했듯 redirect이 아니라 forward이기에 경로는 여전히 servlet-mvc/members 이다.
+- 이런 MVC 패턴의 한계는 viewPath, forward가 중복되고 response 등 사용하지 않는 코드들이 있다는 점이다. 즉 공통처리가 어렵다.
+- 이걸 해결하기 위해 소위 수문장 역할을 하는 기능이 필요하다. 프론트 컨트롤러(Front Controller) 패턴을 도입하면 이런 문제를 깔끔하게 해결할 수 있다.
