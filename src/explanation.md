@@ -92,3 +92,83 @@
 - jsp는 getAttribute로 데이터를 조회하기에 모델의 데이터를 꺼내서 setAttribute에 리퀘스트 담아야함. 다른 템플릿은 다른 함수 씀
 
 - v4에서는 모든 컨트롤러들이 논리적 경로를 리턴해준다
+- v5에는 어댑터기능을 넣어서 v3, v4를 기호에 따라 사용하게 만듦
+
+- @RequestMapping("/hello") 처럼 스프링의 어노테이션은 실제 RequestMappingHandlerAdapter 처럼 동작한다고 해석하면 된다. 즉 이 어노테이션 컨트롤러를 처리해주는 어댑터이다.
+
+- OldController : 스프링빈의 이름을 @Component("/springmvc/old-controller")이걸 통해서 저 경로를 이름으로 설정한거임. 그러면 스프링이 빈의 이름으로 핸들러를 찾을때 핸들러로 끄집어내줌. 'Controller' 인터페이스 (어노테이션 아님)를 통해 실행할 수 있는 핸들러 어댑터를 찾고 실행. (스프링에서 이미 업대터를 대부분 구현해 두었음).
+- *스프링 부트가 자동 등록*하는 핸들러 매핑과 핸들러 어댑터
+  - HandlerMapping
+    - 0 = RequestMappingHandlerMapping : 애노테이션 기반의 컨트롤러인 @RequestMapping에서 사용
+    - 1 = BeanNameUrlHandlerMapping : 스프링 빈의 이름으로 핸들러를 찾는다
+  - HandlerAdapter
+    - 0 = RequestMappingHandlerAdapter : 애노테이션 기반의 컨트롤러인 @RequestMapping에서 사용
+    - 1 = HttpRequestHandlerAdapter : HttpRequestHandler 처리
+    - 2 = SimpleControllerHandlerAdapter : Controller 인터페이스(애노테이션X, 과거에 사용) 처리
+  - 핸들러 매핑도, 핸들러 어댑터도 모두 순서대로 찾고 만약 없으면 다음 순서로 넘어간다.
+- 뷰 - InternalResourceView InternalResourceView 는 JSP처럼 포워드 forward() 를 호출해서 처리할 수 있는 경우에 사용한다.
+
+----
+
+**실제 Spring MVC 이용한 설계**
+
+- *@RequestMapping*
+  - *RequestMappingHandlerMapping*
+  - *RequestMappingHandlerAdapter*
+  - 앞서 보았듯이 가장 우선순위가 높은 핸들러 매핑과 핸들러 어댑터는 RequestMappingHandlerMapping , RequestMappingHandlerAdapter 이다. @RequestMapping 의 앞글자를 따서 만든 이름인데, 이것이 바로 지금 스프링에서 주로 사용하는 애노테이션 기반의 컨트롤러를 지원하는 핸들러 매핑과 어댑터이다. 실무에서는 99.9% 이 방식의 컨트롤러를 사용한다.
+
+- SpringMemberForm/Save/ListControllerV1
+  - @Controller가 붙는다
+    - 스프링이 자동으로 스프링 빈으로 등록한다. (내부에 @Component 애노테이션이 있어서 컴포넌트 스캔의 대상이 됨)
+    - Controller 내부 들어가보면 Component 에노테이션 붙어있음. 그래서 스캔 대상이 역시 되는거임
+    - 스프링 MVC에서 애노테이션 기반 컨트롤러로 인식한다.
+      - RequestMappingHandlerMapping은 스프링 빈 중에서 @RequestMapping 또는 @Controller 가 클래스 레벨에 붙어 있는 경우에 매핑 정보로 인식한다. 그래서 꺼낼수 있는 대상임을 인지한다
+  - @RequestMapping(...URL...)
+    - 요청 정보를 매핑한다. 해당 URL이 호출되면 이 메서드가 호출된다.
+  - 실제 스프링이 제공하는 ModelAndView 클래스의 생성자를 호출한다. 이때 논리 뷰이름을 넘긴다.
+    - public ModelAndView(String viewName) {  this.view = viewName;  }
+    - 실제로 들어가보면 이렇게 구현되어 있음
+    - process 같은 메서드 이름은 임의로 정하면 됨
+      - Spring의 DispatcherServlet(프론트컨트롤러역할)은 모든 HTTP 요청을 가로채고, URL에 따라 알맞은 컨트롤러와 메서드를 호출합니다. @RequestMapping이 선언된 메서드를 찾아 자동으로 호출하기에 오버라이드 된 것이 아닌 임의의 메서드라도 괜찮은거임.
+  - 그러면 뷰 리졸버에서 jsp를 처리하기 위한 뷰가 찾아져서 걔가 렌더가 됩니다
+    - application.properties에
+    - spring.mvc.view.prefix=/WEB-INF/views/
+    - spring.mvc.view.suffix=.jsp 이렇게 정의해준게 리졸브 역할을 하는 듯
+    - 저렇게 정의해주면 spring에서 InternalResourceViewResolver를 사용해서 save-result라는 논리 뷰를 리졸버가 경로를 덕지덕지 붙여서 전체 경로 생성함
+  - mv.addObject("member", member);할때 "member"는 Member member = new 로 생성된 객체임 즉 사용자가 HTML 폼에 입력한 데이터를 바탕으로 만들어진 도메인 객체이다. "member"는 속성 이름, member는 속성 값으로 뷰에서 참조된다. addObject("key", value) 형태임. 이 코드를 통해 컨트롤러에서 생성된 데이터를 뷰에 전달 가능함 (Model의 역할임)
+  - 즉 DispatcherServlet은
+    - MODEL 데이터 전달 역할
+      - addObject() 메서드를 통해 컨트롤러에서 ModelAndView 객체에 추가된 데이터를 수집합니다.
+    - VIEW 리졸버 역할
+      - 뷰 리졸버를 통해 컨트롤러가 반환할 뷰 이름(save-result 등)을 실제 뷰 파일 /WEB-INF ~ .jsp로 맵핑해서 클라이언트 HTML 응답에 반환
+  - 클래스 레벨에서 @Controller 대신 @Component + @RequestMapping으로 해도 되긴 함 (근데 스프링부트 3.0부터는 이 방식은 안됨)
+
+- v2는 하나의 컨트롤러에 form, list, save 다 넣었음
+- 이전 v3->v4 넘어갈때 반환을 논리 뷰로만 하도록 간단하게 구현하는걸 이번 v3에서 구축함. *가장 간단함*
+  - ModelandView가 아닌 String으로 반환해도 스프링에서 알아서 뷰로 인식해줌
+  - @RequestParam 으로 username, age라는 요청파라미터를 처리한다.
+    - request.getParameter("username") 과 기능적으로 동일함
+  - @GetMapping
+    - @RequestMapping은 GET이든 POST든 구분하지 않고 다 받음. 이때 GetMapping으로 변경해주면
+    - /new-form은 GET으로 호출될때만 제공됨을 보장함
+  - @PostMapping
+    - POST로 호출될때만 정상 동작시켜주는걸 보장해줌
+  - v1에 addObject 사용헀는데 이거 내부 들어가보면 addAttribute 사용함. v3에선 이걸 쓴다.
+  - 스프링이 제공하는 인터페이스 Model은 컨트롤러 메서드 내에서 데이터를 추가하고, 이를 뷰에 전달하는 데 사용됩니다. 컨트롤러가 처리한 결과 데이터를 Model 객체에 담으면, DispatcherServlet이 이를 뷰로 전달합니다.
+    - 데이터를 키-값 쌍(attribute name과 value)으로 저장합니다.
+    - 저장된 데이터는 DispatcherServlet을 통해 뷰에 전달됩니다.
+    - 템플릿(예: JSP, Thymeleaf)에서는 Model에 저장된 데이터를 렌더링에 사용합니다.
+- 간단한 설계는 v3 쓰고 내부적으로 복잡하면 v2를 쓰는게 좋을 듯
+- *v3 정리*
+  - @Controller가 붙으면 DispatcherServlet이 등록됨
+  - newForm(), save(), members()는 개별적인 개별적인 요청 처리 핸들러 메서드(컨트롤러)임.
+  - DispatcherServlet은 쟤네 3명이 호출될 때 Http 요청을 먼저 가로채고 처리과정을 조율함.
+  - DispatcherServlet이 @RequestMapping의 RequestMappingHandlerMapping과 RequestMappingHandlerAdapter를 통해 컨트롤러(핸들러)와 어댑터를 조회하고 이 컨트롤러들을 호출함.
+    - @GetMapping("/new-form") @PostMapping("/save") @GetMapping이 핸들러를 맵핑하는 과정이고
+    - save() 메서드는 핸들러 어댑터를 통해 호출됩니다. RequestMappingHandlerAdapter가 save() 메서드를 실행하고, 실행 결과로 논리 뷰 이름("save-result")을 반환니다.
+  - 각 컨트롤러들의 반환형은 ModelAndView임. 근데 V3는 String으로 간편화 시켰음 (스프링에서 알아서 뷰로 인식).
+  - 그러면 이 논리 뷰 경로를 뷰 리졸버를 통해 전체 뷰 경로를 생성하고 최종적으로 View를 렌더링함 (클라에 응답)
+
+----
+- 이제 JSP를 쓰지않고 Thymeleaf를 이용한 Spring MVC를 구축함
+- Jar를 사용하면 항상 내장 서버(톰캣등)를 사용하고, webapp 경로도 사용하지 않습니다. 내장 서버 사용에 최적화 되어 있는 기능입니다. 최근에는 주로 이 방식을 사용합니다. War를 사용하면 내장 서버도 사용가능 하지만, 주로 외부 서버에 배포하는 목적으로 사용합니다.
